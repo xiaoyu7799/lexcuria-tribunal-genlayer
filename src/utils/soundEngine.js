@@ -1,8 +1,9 @@
 class CourtSoundEngine {
   constructor() {
     this.ctx = null;
-    this.ambientGain = null;
-    this.ambientOsc = null;
+    this.ambientMaster = null;
+    this.ambientOscA = null;
+    this.ambientOscB = null;
     this.isEnabled = false;
     this.hasAutoUnlockedOnce = false;
     this.manuallyDisabled = false;
@@ -37,39 +38,81 @@ class CourtSoundEngine {
   }
 
   _startAmbientDrone() {
-    if (!this.ctx || this.ambientOsc) return;
+    if (!this.ctx || this.ambientOscA) return;
     try {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(110, this.ctx.currentTime); // Subtle courtroom hall resonance (A2)
-      gain.gain.setValueAtTime(0.012, this.ctx.currentTime);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start();
-      this.ambientOsc = osc;
-      this.ambientGain = gain;
+      const now = this.ctx.currentTime;
+      const master = this.ctx.createGain();
+      master.gain.setValueAtTime(0.001, now);
+      master.gain.exponentialRampToValueAtTime(0.045, now + 0.6);
+
+      // Warm low-pass filter so the courtroom pad is clearly audible on laptop/mobile speakers
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(520, now);
+
+      const oscA = this.ctx.createOscillator();
+      const oscB = this.ctx.createOscillator();
+      oscA.type = "triangle";
+      oscB.type = "sine";
+      oscA.frequency.setValueAtTime(196.0, now); // G3 warm fundamental
+      oscB.frequency.setValueAtTime(293.66, now); // D4 fifth harmonic
+
+      oscA.connect(filter);
+      oscB.connect(filter);
+      filter.connect(master);
+      master.connect(this.ctx.destination);
+
+      oscA.start(now);
+      oscB.start(now);
+
+      this.ambientMaster = master;
+      this.ambientOscA = oscA;
+      this.ambientOscB = oscB;
     } catch {
-      // Ignore WebAudio restrictions if blocked
+      // Ignore if browser blocks audio
     }
   }
 
   _stopAmbientDrone() {
-    if (this.ambientOsc) {
+    if (this.ambientOscA) {
       try {
-        this.ambientOsc.stop();
-        this.ambientOsc.disconnect();
+        this.ambientOscA.stop();
+        this.ambientOscB.stop();
+        this.ambientMaster.disconnect();
       } catch {
         // noop
       }
-      this.ambientOsc = null;
-      this.ambientGain = null;
+      this.ambientOscA = null;
+      this.ambientOscB = null;
+      this.ambientMaster = null;
     }
   }
 
   /**
-   * Called on the user's first pointer/click interaction with the document.
-   * Never runs on page load; never re-enables if user manually turned audio off.
+   * Audible brass bell chime when courtroom audio is first unlocked or toggled ON.
+   */
+  playUnlockChime() {
+    if (!this.isEnabled || !this.ctx) return;
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(587.33, now); // D5
+      osc.frequency.exponentialRampToValueAtTime(880, now + 0.18); // A5
+      gain.gain.setValueAtTime(0.16, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.46);
+    } catch {
+      // noop
+    }
+  }
+
+  /**
+   * Called on the user's first click anywhere on the page (excluding the manual audio toggle button).
    */
   handleFirstUserInteraction() {
     if (this.manuallyDisabled || this.hasAutoUnlockedOnce) {
@@ -79,7 +122,7 @@ class CourtSoundEngine {
     this._initContext();
     this.isEnabled = true;
     this._startAmbientDrone();
-    this.playPaperRustle();
+    this.playUnlockChime();
     this.notify();
   }
 
@@ -97,13 +140,13 @@ class CourtSoundEngine {
       this.isEnabled = true;
       this.manuallyDisabled = false;
       this._startAmbientDrone();
-      this.playPaperRustle();
+      this.playUnlockChime();
     }
     this.notify();
   }
 
   /**
-   * Subtle tactile feedback when switching courtroom benches or dossier cards.
+   * Audible crisp page flip / dossier switch sound.
    */
   playPaperRustle() {
     if (!this.isEnabled || !this.ctx) return;
@@ -112,42 +155,71 @@ class CourtSoundEngine {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = "triangle";
-      osc.frequency.setValueAtTime(240, now);
-      osc.frequency.exponentialRampToValueAtTime(160, now + 0.06);
-      gain.gain.setValueAtTime(0.03, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.065);
+      osc.frequency.setValueAtTime(340, now);
+      osc.frequency.exponentialRampToValueAtTime(180, now + 0.08);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.085);
       osc.connect(gain);
       gain.connect(this.ctx.destination);
       osc.start(now);
-      osc.stop(now + 0.07);
+      osc.stop(now + 0.09);
     } catch {
       // noop
     }
   }
 
   /**
-   * Double wooden gavel strike played ONLY when a ruling reaches FINALIZED
-   * and audio is currently enabled.
+   * Realistic Double Wooden Gavel Strike (Wood crack transient + resonant hardwood body).
+   * Clearly audible on all speakers when a ruling reaches FINALIZED or when testing gavel.
    */
   playGavelStrike() {
-    if (!this.isEnabled || !this.ctx) return;
-    const strikeAt = (offsetSec, peakGain) => {
+    this._initContext();
+    if (!this.isEnabled) {
+      // If user hasn't manually muted, auto-enable when explicitly testing gavel
+      if (!this.manuallyDisabled) {
+        this.hasAutoUnlockedOnce = true;
+        this.isEnabled = true;
+        this._startAmbientDrone();
+        this.notify();
+      } else {
+        return;
+      }
+    }
+    if (!this.ctx) return;
+
+    const triggerWoodKnock = (offsetSec, peakGain) => {
       const now = this.ctx.currentTime + offsetSec;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(195, now);
-      osc.frequency.exponentialRampToValueAtTime(58, now + 0.14);
-      gain.gain.setValueAtTime(peakGain, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.17);
+
+      // 1. Resonant Hardwood Body (Low-Mid Punch)
+      const bodyOsc = this.ctx.createOscillator();
+      const bodyGain = this.ctx.createGain();
+      bodyOsc.type = "triangle";
+      bodyOsc.frequency.setValueAtTime(280, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(72, now + 0.16);
+      bodyGain.gain.setValueAtTime(peakGain, now);
+      bodyGain.gain.exponentialRampToValueAtTime(0.001, now + 0.19);
+      bodyOsc.connect(bodyGain);
+      bodyGain.connect(this.ctx.destination);
+      bodyOsc.start(now);
+      bodyOsc.stop(now + 0.2);
+
+      // 2. Crisp Wooden Impact Click (High-Mid Transient)
+      const clickOsc = this.ctx.createOscillator();
+      const clickGain = this.ctx.createGain();
+      clickOsc.type = "square";
+      clickOsc.frequency.setValueAtTime(920, now);
+      clickOsc.frequency.exponentialRampToValueAtTime(210, now + 0.045);
+      clickGain.gain.setValueAtTime(peakGain * 0.45, now);
+      clickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+      clickOsc.connect(clickGain);
+      clickGain.connect(this.ctx.destination);
+      clickOsc.start(now);
+      clickOsc.stop(now + 0.055);
     };
+
     try {
-      strikeAt(0, 0.18);
-      strikeAt(0.22, 0.24);
+      triggerWoodKnock(0, 0.42);
+      triggerWoodKnock(0.24, 0.52);
     } catch {
       // noop
     }
