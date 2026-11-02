@@ -1,7 +1,8 @@
 # LexCuria — On-Chain Multi-Party Tribunal & Precedent Evolution Protocol
 
-- **Planned Live Website (GitHub Pages — Not live until deployed by Muse/user)**: https://xiaoyu7799.github.io/lexcuria-tribunal-genlayer/
+- **Live Website (GitHub Pages)**: https://xiaoyu7799.github.io/lexcuria-tribunal-genlayer/
 - **Repository**: https://github.com/xiaoyu7799/lexcuria-tribunal-genlayer
+- **Contract (GenLayer Stable Studionet, 61999)**: 0x3b82A35c7D6701eefB6F500d8b84b37C1720e1aa — https://explorer-studio.genlayer.com/address/0x3b82A35c7D6701eefB6F500d8b84b37C1720e1aa
 - **Target Network**: GenLayer Stable Studionet (`Chain ID: 61999`, RPC: `https://studio.genlayer.com/api`, `gas: 0`)
 
 > **Important Status Notice**: This repository contains the complete initial code package (Intelligent Contract, local mock test suite, resumable Studionet deployment script, and bilingual Editorial Legal Gazette frontend). Actual Studionet contract deployment, live transaction finalization, and GitHub Pages publishing are executed and verified by Muse / the repository owner.
