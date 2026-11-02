@@ -179,17 +179,8 @@ export async function connectInjectedWallet() {
 
 export function createStudionetClient() {
   const ephemeral = getOrCreateEphemeralAccount();
-  return createClient({
-    chain: {
-      ...studionet,
-      id: STUDIONET_CHAIN_ID,
-      rpcUrls: {
-        default: { http: [STUDIONET_RPC_URL] },
-        public: { http: [STUDIONET_RPC_URL] },
-      },
-    },
-    account: ephemeral,
-  });
+  // genlayer-js 1.1.8: studionet already points to Stable Studionet 61999.
+  return createClient({ chain: studionet, account: ephemeral });
 }
 
 export async function readCourtSnapshotOnChain(contractAddress, fallbackState) {

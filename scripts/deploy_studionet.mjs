@@ -59,17 +59,9 @@ async function main() {
   const ephemeralAccount = createAccount();
   console.log(`Ephemeral Deployer Address (in-memory only): ${ephemeralAccount.address}`);
 
-  const client = createClient({
-    chain: {
-      ...studionet,
-      id: EXPECTED_CHAIN_ID,
-      rpcUrls: {
-        default: { http: [EXPECTED_RPC_URL] },
-        public: { http: [EXPECTED_RPC_URL] },
-      },
-    },
-    account: ephemeralAccount,
-  });
+  // genlayer-js 1.1.8: studionet chain already points to Stable Studionet
+  // (id 61999, https://studio.genlayer.com/api); do not override its rpcUrls.
+  const client = createClient({ chain: studionet, account: ephemeralAccount });
 
   let txHash = parseResumeTxHash();
 
@@ -84,11 +76,12 @@ async function main() {
     const contractCode = fs.readFileSync(contractPath, "utf-8");
 
     console.log("[DEPLOY MODE] Broadcasting LexCuriaCourt to Studionet (61999, gas: 0)...");
+    // Studionet is gasless (gas price 0 on the network); 1.1.8 deployContract
+    // takes no gas parameter.
     txHash = await client.deployContract({
       code: contractCode,
       args: [],
       leaderOnly: false,
-      gas: 0n,
     });
     console.log(`[BROADCAST COMPLETE] Transaction Hash: ${txHash}`);
     console.log(
