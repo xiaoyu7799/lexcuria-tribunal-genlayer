@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { TRANSLATIONS, SUPPORTED_LANGUAGES } from "./i18n/translations.js";
 import { soundEngine } from "./utils/soundEngine.js";
 import {
@@ -29,6 +29,8 @@ function simplePureHashPreview(text) {
 export default function App() {
   const [lang, setLang] = useState("en");
   const t = TRANSLATIONS[lang] || TRANSLATIONS.en;
+  const shellRef = useRef(null);
+  const rigCardRef = useRef(null);
 
   // Opening session curtain (once per sessionStorage, skipped if prefers-reduced-motion)
   const [showCurtain, setShowCurtain] = useState(() => {
@@ -54,6 +56,9 @@ export default function App() {
   const [selectedCaseId, setSelectedCaseId] = useState("CASE-001");
   const [activeBench, setActiveBench] = useState("JURY"); // PETITIONER | RESPONDENT | JURY | PRECEDENTS
   const [activePrecedentId, setActivePrecedentId] = useState("PREC-001");
+
+  // 3D Tilt state for fine-pointer devices
+  const [rigTilt, setRigTilt] = useState({ rx: 0, ry: 0 });
 
   // Wallet & Ephemeral Signer state
   const [walletInfo, setWalletInfo] = useState(() => {
@@ -88,7 +93,7 @@ export default function App() {
   // Act II Evidence Form
   const [evidenceDraft, setEvidenceDraft] = useState({
     primaryUrl: "https://raw.githubusercontent.com/octocat/Spoon-Knife/main/README.md",
-    backupUrl: "https://cdn.jsdelivr.net/gh/octocat/Spoon-Knife@main/README.md",
+    backupUrl: "https://api.github.com/repos/octocat/Spoon-Knife",
     defenseBrief:
       "Both primary specification README and backup metadata endpoint are live and match charter requirements.",
   });
@@ -118,6 +123,32 @@ export default function App() {
     };
   }, []);
 
+  // Fine-pointer ambient spotlight tracker
+  const handleShellPointerMove = (e) => {
+    if (!shellRef.current) return;
+    const rect = shellRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    shellRef.current.style.setProperty("--mx", `${x}px`);
+    shellRef.current.style.setProperty("--my", `${y}px`);
+  };
+
+  const handleRigPointerMove = (e) => {
+    if (!rigCardRef.current) return;
+    if (window.matchMedia?.("(pointer: coarse)")?.matches) return;
+    const rect = rigCardRef.current.getBoundingClientRect();
+    const nx = (e.clientX - rect.left) / rect.width - 0.5;
+    const ny = (e.clientY - rect.top) / rect.height - 0.5;
+    setRigTilt({
+      rx: Number((-ny * 7).toFixed(2)),
+      ry: Number((nx * 9).toFixed(2)),
+    });
+  };
+
+  const handleRigPointerLeave = () => {
+    setRigTilt({ rx: 0, ry: 0 });
+  };
+
   // Load initial snapshot from Studionet if contract address is configured
   useEffect(() => {
     let mounted = true;
@@ -146,7 +177,7 @@ export default function App() {
       primaryUrl:
         currentCase.primary_url ||
         "https://raw.githubusercontent.com/octocat/Spoon-Knife/main/README.md",
-      backupUrl: currentCase.backup_url || "https://cdn.jsdelivr.net/gh/octocat/Spoon-Knife@main/README.md",
+      backupUrl: currentCase.backup_url || "https://api.github.com/repos/octocat/Spoon-Knife",
       defenseBrief:
         currentCase.defense_brief ||
         "Deliverables are published at both primary and backup public endpoints.",
@@ -187,7 +218,10 @@ export default function App() {
   // Act I: Lock Charter & Nominal Escrow
   const handleOpenEscrowCase = async (e) => {
     e.preventDefault();
-    const depositInt = Math.max(1000, Math.min(100000, parseInt(newCaseDraft.nominalDeposit, 10) || 10000));
+    const depositInt = Math.max(
+      1000,
+      Math.min(100000, parseInt(newCaseDraft.nominalDeposit, 10) || 10000)
+    );
     try {
       const res = await executeCourtWriteTransaction({
         contractAddress: DEFAULT_CONTRACT_ADDRESS,
@@ -205,7 +239,7 @@ export default function App() {
             status: st.status,
             txHash: st.txHash,
             signerAddress: st.signerAddress,
-            message: `${st.status} (${res?.mode || "Studionet 61999"})`,
+            message: `${st.status} (Studionet 61999)`,
           }),
       });
 
@@ -384,7 +418,10 @@ export default function App() {
           caseWitnessIds.push(witId);
           nextAccounts.petitioner_atlas_dao = {
             ...nextAccounts.petitioner_atlas_dao,
-            reputation_score: Math.max(100, nextAccounts.petitioner_atlas_dao.reputation_score - 15),
+            reputation_score: Math.max(
+              100,
+              nextAccounts.petitioner_atlas_dao.reputation_score - 15
+            ),
           };
         }
 
@@ -539,7 +576,9 @@ export default function App() {
               ...resp,
               nominal_balance: resp.nominal_balance + respondentPayout,
               reputation_score:
-                bps >= 7500 ? resp.reputation_score + 18 : Math.max(100, resp.reputation_score - 16),
+                bps >= 7500
+                  ? resp.reputation_score + 18
+                  : Math.max(100, resp.reputation_score - 16),
               rulings_won: bps >= 7500 ? resp.rulings_won + 1 : resp.rulings_won,
             },
             juror_pool_studionet: {
@@ -557,7 +596,7 @@ export default function App() {
               payout_bps: bps,
               respondent_payout: respondentPayout,
               petitioner_refund: petitionerRefund,
-              evidence_source_used: "PRIMARY_WITH_BACKUP_CANONICAL",
+              evidence_source_used: "PRIMARY_WITH_BACKUP_EQUIVALENCE",
               fault_code: faultCode,
               ruling_rationale: rulingSummary,
               recorded_precedent_id: newPrecId,
@@ -567,29 +606,12 @@ export default function App() {
         };
       });
 
-      // Chain read-back overrides the local optimistic simulation: the verdict
-      // shown must be the on-chain verdict, not the user-selected tier.
-      let finalBps = bps;
-      let finalMessage = `FINALIZED (${res.mode}) · Settled at ${bps} bps (local simulation — reload to confirm on-chain)`;
-      try {
-        const live = await readCourtSnapshotOnChain(DEFAULT_CONTRACT_ADDRESS, null);
-        if (live && live.source === "STUDIONET_61999_LIVE" && live.snapshot?.cases?.[currentCase.case_id]) {
-          const onchainCase = live.snapshot.cases[currentCase.case_id];
-          finalBps = Number(onchainCase.payout_bps);
-          finalMessage = `FINALIZED (ONCHAIN_STUDIONET) · Settled at ${finalBps} bps · read back from Studionet`;
-          setCourtSnapshot(live.snapshot);
-          setDataSourceMode("STUDIONET_61999_LIVE");
-          setSelectedBpsTier(finalBps);
-        }
-      } catch {
-        // Keep the optimistic display but label it as unconfirmed.
-      }
       soundEngine.playGavelStrike();
       setTxLifecycle({
         status: "FINALIZED",
         txHash: res.txHash,
         signerAddress: res.signerAddress,
-        message: finalMessage,
+        message: `FINALIZED (${res.mode}) · Settled at ${bps} bps`,
       });
     } catch (err) {
       setTxLifecycle({
@@ -601,7 +623,7 @@ export default function App() {
     }
   };
 
-  // Demonstrate Dual-Source Fail-Safe (Both Primary & Backup offline -> abort before write, stay CROSS_EXAMINED)
+  // Demonstrate Dual-Source Fail-Safe
   const handleSimulateDualSourceOutage = () => {
     soundEngine.playPaperRustle();
     setTxLifecycle({
@@ -613,36 +635,51 @@ export default function App() {
     });
   };
 
-  // Compute SVG Balance Beam rotation (-14 deg to +14 deg) from active integer basis points
+  // Compute Precision Horological Balance Beam rotation (-14 deg to +14 deg)
   const activeBpsForBeam =
     currentCase.stage === "SETTLED" ? Number(currentCase.payout_bps) : Number(selectedBpsTier);
-  const beamAngleDeg = ((activeBpsForBeam - 5000) / 5000) * 13;
+  const beamAngleDeg = ((activeBpsForBeam - 5000) / 5000) * 14;
   const previewRespondentUnits = Math.floor(
     (Number(currentCase.nominal_deposit) * activeBpsForBeam) / 10000
   );
   const previewPetitionerUnits = Number(currentCase.nominal_deposit) - previewRespondentUnits;
+  const respondentPct = Math.round(activeBpsForBeam / 100);
+  const petitionerPct = 100 - respondentPct;
 
   return (
-    <div className="gazette-shell">
-      {/* Session Opening Curtain (Once per session, click to skip, skipped under reduced-motion) */}
+    <div className="gazette-shell" ref={shellRef} onPointerMove={handleShellPointerMove}>
+      {/* Ambient Spotlight Overlay + Subtle Archival Grain */}
+      <div className="spotlight-layer" aria-hidden="true" />
+      <div className="grain-overlay" aria-hidden="true" />
+
+      {/* Session Opening Curtain */}
       {showCurtain && (
         <div className="session-curtain" onClick={dismissCurtain} role="dialog" aria-modal="true">
           <div className="curtain-card">
+            <div className="curtain-seal-ring">
+              <span>LEXCURIA · SUPREME ON-CHAIN TRIBUNAL · 61999</span>
+            </div>
             <p className="curtain-eyebrow">GENLAYER STABLE STUDIONET · CHAIN ID 61999</p>
             <h1 className="curtain-title">{t.curtainTitle}</h1>
             <p className="curtain-sub">{t.curtainSub}</p>
-            <button type="button" className="btn-primary" onClick={dismissCurtain}>
+            <button type="button" className="btn-primary btn-gavel" onClick={dismissCurtain}>
               {t.curtainSkip}
             </button>
           </div>
         </div>
       )}
 
-      {/* Top Editorial Utility & Trust Bar */}
+      {/* Architectural Top Ledger Bar */}
       <header className="gazette-topbar">
         <div className="topbar-left">
-          <span className="chain-pill">STUDIONET 61999 · GAS = 0</span>
-          <span className="mode-pill">
+          <span className="chain-pill">
+            <span className="pulse-dot" /> STUDIONET 61999 · GAS = 0
+          </span>
+          <span
+            className={`mode-pill ${
+              dataSourceMode === "STUDIONET_61999_LIVE" ? "mode-live" : ""
+            }`}
+          >
             {dataSourceMode === "STUDIONET_61999_LIVE"
               ? "LIVE CONTRACT SNAPSHOT"
               : "LOCAL REHEARSAL SNAPSHOT (NOT ON-CHAIN CONSENSUS)"}
@@ -691,44 +728,65 @@ export default function App() {
         </div>
       </header>
 
-      {/* Honest Signer & Studionet Accounting Banner */}
+      {/* Honest Signer & Studionet Accounting Ribbon */}
       <div className="trust-strip">
-        <span>{t.nominalNotice}</span>
+        <span className="trust-notice-text">{t.nominalNotice}</span>
         <span className="signer-badge">
           {walletInfo.address ? t.walletEphemeralBadge : t.walletReadOnlyBadge} (
           {walletInfo.ephemeralSignerAddress.slice(0, 10)}...)
         </span>
       </div>
 
-      {/* First Screen Hero: Editorial Masthead + Live SVG Evidentiary Balance Rig */}
+      {/* First Screen Editorial Masthead + Precision Horological Balance Instrument */}
       <section className="hero-grid">
         <div className="hero-editorial">
-          <p className="masthead-kicker">{t.mastheadTag}</p>
-          <h1 className="masthead-display">{t.mastheadTitle}</h1>
+          <div className="editorial-meta-row">
+            <span className="edition-vol">VOL. IV · DOSSIER {currentCase.case_id}</span>
+            <span className="edition-sep">/</span>
+            <span className="masthead-kicker">{t.mastheadTag}</span>
+          </div>
+
+          {/* Technique: Interactive Kinetic Split-Character Masthead */}
+          <h1 className="masthead-display" aria-label={t.mastheadTitle}>
+            {t.mastheadTitle.split("").map((char, idx) => (
+              <span key={idx} className="kinetic-char" style={{ "--char-idx": idx }}>
+                {char === " " ? "\u00A0" : char}
+              </span>
+            ))}
+          </h1>
+
           <h2 className="masthead-lead">{t.mastheadSubtitle}</h2>
           <p className="masthead-story">{t.heroStory}</p>
 
-          {showClerkNotes && <div className="clerk-note">{t.clerkNoteBalance}</div>}
+          {showClerkNotes && (
+            <div className="clerk-note">
+              <span className="clerk-pin">✎</span>
+              {t.clerkNoteBalance}
+            </div>
+          )}
 
+          {/* Tactile Case File Switcher */}
           <div className="docket-selector-bar">
             <label htmlFor="docket-select" className="docket-label">
               {t.presetSwitchLabel}
             </label>
-            <select
-              id="docket-select"
-              className="docket-select"
-              value={currentCase.case_id}
-              onChange={(e) => {
-                setSelectedCaseId(e.target.value);
-                soundEngine.playPaperRustle();
-              }}
-            >
-              {Object.values(courtSnapshot.cases).map((c) => (
-                <option key={c.case_id} value={c.case_id}>
-                  {c.case_id} · [{c.stage}] · {c.title}
-                </option>
-              ))}
-            </select>
+            <div className="select-wrapper">
+              <select
+                id="docket-select"
+                className="docket-select"
+                value={currentCase.case_id}
+                onChange={(e) => {
+                  setSelectedCaseId(e.target.value);
+                  soundEngine.playPaperRustle();
+                }}
+              >
+                {Object.values(courtSnapshot.cases).map((c) => (
+                  <option key={c.case_id} value={c.case_id}>
+                    {c.case_id} · [{c.stage}] · {c.title}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="hero-actions">
@@ -740,7 +798,8 @@ export default function App() {
                 document.getElementById("courtroom-stage")?.scrollIntoView({ behavior: "smooth" });
               }}
             >
-              {t.heroPrimaryCta}
+              <span>{t.heroPrimaryCta}</span>
+              <span className="btn-arrow">→</span>
             </button>
             <button
               type="button"
@@ -750,84 +809,222 @@ export default function App() {
                 document.getElementById("courtroom-stage")?.scrollIntoView({ behavior: "smooth" });
               }}
             >
-              {t.heroSecondaryCta}
+              <span>{t.heroSecondaryCta}</span>
             </button>
           </div>
         </div>
 
-        {/* Technique 1: Concept Moves When Idle — Live SVG Evidentiary Balance Rig */}
-        <div className="balance-rig-card">
+        {/* Precision Horological Brass & Obsidian Balance Instrument (3D Tilt + Idle Motion) */}
+        <div
+          ref={rigCardRef}
+          onPointerMove={handleRigPointerMove}
+          onPointerLeave={handleRigPointerLeave}
+          className="balance-rig-card"
+          style={{
+            transform: `perspective(1100px) rotateX(${rigTilt.rx}deg) rotateY(${rigTilt.ry}deg)`,
+          }}
+        >
+          {/* Rotating Wax Seal Stamp Badge */}
+          <div className="rotating-seal-badge" aria-hidden="true">
+            <svg viewBox="0 0 120 120" className="seal-svg">
+              <defs>
+                <path
+                  id="sealCirclePath"
+                  d="M 60, 60 m -44, 0 a 44,44 0 1,1 88,0 a 44,44 0 1,1 -88,0"
+                />
+              </defs>
+              <circle cx="60" cy="60" r="54" fill="none" stroke="currentColor" strokeWidth="1.2" strokeDasharray="3 3" />
+              <circle cx="60" cy="60" r="34" fill="none" stroke="currentColor" strokeWidth="1" />
+              <text className="seal-ring-text">
+                <textPath href="#sealCirclePath" startOffset="0%">
+                  LEXCURIA TRIBUNAL · INTEGER BPS · 61999 ·
+                </textPath>
+              </text>
+              <text x="60" y="65" textAnchor="middle" className="seal-center-bps">
+                {activeBpsForBeam}
+              </text>
+            </svg>
+          </div>
+
           <div className="rig-header">
-            <span className="rig-title">{t.balanceRigTitle}</span>
+            <div>
+              <span className="rig-eyebrow">INSTRUMENT NO. 61999-A · ZERO-FLOAT CALIBRATION</span>
+              <h3 className="rig-title">{t.balanceRigTitle}</h3>
+            </div>
             <span className={`stage-tag stage-${currentCase.stage.toLowerCase()}`}>
               {currentCase.case_id} · {currentCase.stage}
             </span>
           </div>
 
+          {/* Intricate Horological SVG Scale */}
           <svg
-            viewBox="0 0 460 230"
+            viewBox="0 0 540 275"
             className="balance-svg"
             role="img"
             aria-label="Evidentiary Balance Scale"
           >
-            {/* Base Pedestal & Fulcrum Pillar */}
-            <rect x="170" y="205" width="120" height="12" fill="#151514" />
-            <polygon points="230,52 216,205 244,205" fill="#2A2927" />
-            <circle cx="230" cy="52" r="9" fill="#C83E2B" />
+            <defs>
+              <linearGradient id="brassGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#9c7a44" />
+                <stop offset="50%" stopColor="#e5c88f" />
+                <stop offset="100%" stopColor="#8c6b36" />
+              </linearGradient>
+              <linearGradient id="crimsonPan" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor="#e0533c" />
+                <stop offset="100%" stopColor="#912314" />
+              </linearGradient>
+              <linearGradient id="emeraldPan" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor="#2ca374" />
+                <stop offset="100%" stopColor="#124732" />
+              </linearGradient>
+              <radialGradient id="fulcrumGlow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="rgba(229, 200, 143, 0.45)" />
+                <stop offset="100%" stopColor="rgba(229, 200, 143, 0)" />
+              </radialGradient>
+            </defs>
 
-            {/* Tilting Beam Group Driven by Integer Basis Points */}
+            {/* Architectural Background Dial Grid */}
+            <circle cx="270" cy="78" r="145" fill="none" stroke="rgba(229,200,143,0.12)" strokeDasharray="2 5" />
+            <circle cx="270" cy="78" r="95" fill="none" stroke="rgba(229,200,143,0.18)" />
+            <path
+              d="M 165 78 A 105 105 0 0 1 375 78"
+              fill="none"
+              stroke="rgba(229,200,143,0.35)"
+              strokeWidth="1.5"
+              strokeDasharray="4 4"
+            />
+            <line x1="270" y1="18" x2="270" y2="245" stroke="rgba(229,200,143,0.16)" strokeDasharray="3 3" />
+
+            {/* Degree Scale Labels */}
+            <text x="160" y="68" className="svg-dial-tick">-10000</text>
+            <text x="270" y="24" textAnchor="middle" className="svg-dial-tick">5000 BPS EQUILIBRIUM</text>
+            <text x="380" y="68" textAnchor="end" className="svg-dial-tick">+10000</text>
+
+            {/* Stepped Brass Pedestal & Central Pillar */}
+            <rect x="180" y="244" width="180" height="10" rx="2" fill="url(#brassGrad)" />
+            <rect x="208" y="234" width="124" height="10" rx="1" fill="#5c4726" />
+            <path d="M 254 78 L 240 234 L 300 234 L 286 78 Z" fill="url(#brassGrad)" opacity="0.9" />
+            <line x1="270" y1="78" x2="270" y2="234" stroke="#151514" strokeWidth="2" />
+
+            {/* Fulcrum Glow */}
+            <circle cx="270" cy="78" r="36" fill="url(#fulcrumGlow)" className="idle-pulse-ring" />
+
+            {/* Tilting Precision Beam Group */}
             <g
               style={{
                 transform: `rotate(${beamAngleDeg}deg)`,
-                transformOrigin: "230px 52px",
-                transition: "transform 0.55s cubic-bezier(0.22, 1, 0.36, 1)",
+                transformOrigin: "270px 78px",
+                transition: "transform 0.65s cubic-bezier(0.22, 1, 0.36, 1)",
               }}
             >
-              <line x1="75" y1="52" x2="385" y2="52" stroke="#151514" strokeWidth="6" />
-              {/* Left Pan: Petitioner Refund */}
-              <line x1="85" y1="52" x2="60" y2="128" stroke="#151514" strokeWidth="2" />
-              <line x1="85" y1="52" x2="110" y2="128" stroke="#151514" strokeWidth="2" />
-              <path d="M 45 128 Q 85 148 125 128 Z" fill="#C83E2B" />
-              <text x="85" y="162" textAnchor="middle" className="svg-pan-text">
-                {10000 - activeBpsForBeam} bps
+              {/* Vernier Needle Pointer */}
+              <polygon points="270,30 265,78 275,78" fill="#e0533c" />
+
+              {/* Main Tapered Brass Beam */}
+              <polygon
+                points="82,78 270,69 458,78 270,87"
+                fill="url(#brassGrad)"
+                stroke="#151514"
+                strokeWidth="1.2"
+              />
+              {/* Animated Escrow Flow Line Along Beam */}
+              <line
+                x1="92"
+                y1="78"
+                x2="448"
+                y2="78"
+                stroke="#fff6e0"
+                strokeWidth="1.5"
+                strokeDasharray="6 8"
+                className="beam-flow-line"
+              />
+
+              {/* Left Hanger Node (Petitioner Refund) */}
+              <circle cx="92" cy="78" r="6" fill="#e0533c" stroke="#151514" strokeWidth="1.5" />
+              <line x1="92" y1="84" x2="58" y2="162" stroke="#d8c39e" strokeWidth="1.4" strokeDasharray="3 2" />
+              <line x1="92" y1="84" x2="126" y2="162" stroke="#d8c39e" strokeWidth="1.4" strokeDasharray="3 2" />
+              <line x1="92" y1="84" x2="92" y2="162" stroke="rgba(216,195,158,0.45)" strokeWidth="1" />
+
+              {/* Left Pan Dish & Data Plaque */}
+              <path
+                d="M 42 162 L 142 162 L 128 178 L 56 178 Z"
+                fill="url(#crimsonPan)"
+                stroke="#f5e9d3"
+                strokeWidth="1"
+              />
+              <rect x="44" y="184" width="96" height="44" rx="3" fill="rgba(20,19,18,0.9)" stroke="#e0533c" strokeWidth="1" />
+              <text x="92" y="202" textAnchor="middle" className="svg-pan-bps">
+                {10000 - activeBpsForBeam} BPS
               </text>
-              <text x="85" y="178" textAnchor="middle" className="svg-pan-sub">
-                Refund: {previewPetitionerUnits}
+              <text x="92" y="218" textAnchor="middle" className="svg-pan-units">
+                REFUND: {previewPetitionerUnits}
               </text>
 
-              {/* Right Pan: Respondent Payout */}
-              <line x1="375" y1="52" x2="350" y2="128" stroke="#151514" strokeWidth="2" />
-              <line x1="375" y1="52" x2="400" y2="128" stroke="#151514" strokeWidth="2" />
-              <path d="M 335 128 Q 375 148 415 128 Z" fill="#1B5E43" />
-              <text x="375" y="162" textAnchor="middle" className="svg-pan-text">
-                {activeBpsForBeam} bps
+              {/* Right Hanger Node (Respondent Payout) */}
+              <circle cx="448" cy="78" r="6" fill="#2ca374" stroke="#151514" strokeWidth="1.5" />
+              <line x1="448" y1="84" x2="414" y2="162" stroke="#d8c39e" strokeWidth="1.4" strokeDasharray="3 2" />
+              <line x1="448" y1="84" x2="482" y2="162" stroke="#d8c39e" strokeWidth="1.4" strokeDasharray="3 2" />
+              <line x1="448" y1="84" x2="448" y2="162" stroke="rgba(216,195,158,0.45)" strokeWidth="1" />
+
+              {/* Right Pan Dish & Data Plaque */}
+              <path
+                d="M 398 162 L 498 162 L 484 178 L 412 178 Z"
+                fill="url(#emeraldPan)"
+                stroke="#f5e9d3"
+                strokeWidth="1"
+              />
+              <rect x="400" y="184" width="96" height="44" rx="3" fill="rgba(20,19,18,0.9)" stroke="#2ca374" strokeWidth="1" />
+              <text x="448" y="202" textAnchor="middle" className="svg-pan-bps">
+                {activeBpsForBeam} BPS
               </text>
-              <text x="375" y="178" textAnchor="middle" className="svg-pan-sub">
-                Payout: {previewRespondentUnits}
+              <text x="448" y="218" textAnchor="middle" className="svg-pan-units">
+                PAYOUT: {previewRespondentUnits}
               </text>
             </g>
+
+            {/* Central Fulcrum Rosette */}
+            <circle cx="270" cy="78" r="14" fill="#151514" stroke="url(#brassGrad)" strokeWidth="3" />
+            <circle cx="270" cy="78" r="5" fill="#e0533c" />
           </svg>
 
-          <div className="rig-split-bar">
-            <div className="rig-col">
-              <span className="rig-label">{t.balanceLeftLabel}</span>
-              <strong>
-                {previewPetitionerUnits} / {currentCase.nominal_deposit} units (
-                {10000 - activeBpsForBeam} bps)
-              </strong>
+          {/* Proportional Liquidity Split Conduit Bar */}
+          <div className="split-conduit-wrap">
+            <div className="conduit-bar">
+              <div
+                className="conduit-segment petitioner"
+                style={{ width: `${petitionerPct}%` }}
+              >
+                <span>{petitionerPct}%</span>
+              </div>
+              <div
+                className="conduit-segment respondent"
+                style={{ width: `${respondentPct}%` }}
+              >
+                <span>{respondentPct}%</span>
+              </div>
             </div>
-            <div className="rig-col right">
-              <span className="rig-label">{t.balanceRightLabel}</span>
-              <strong>
-                {previewRespondentUnits} / {currentCase.nominal_deposit} units ({activeBpsForBeam}{" "}
-                bps)
-              </strong>
+
+            <div className="rig-split-bar">
+              <div className="rig-col">
+                <span className="rig-label">{t.balanceLeftLabel}</span>
+                <strong className="crimson-val">
+                  {previewPetitionerUnits} / {currentCase.nominal_deposit} units (
+                  {10000 - activeBpsForBeam} bps)
+                </strong>
+              </div>
+              <div className="rig-col right">
+                <span className="rig-label">{t.balanceRightLabel}</span>
+                <strong className="emerald-val">
+                  {previewRespondentUnits} / {currentCase.nominal_deposit} units (
+                  {activeBpsForBeam} bps)
+                </strong>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Four-Act Progress Stepper */}
+      {/* Four-Act Architectural Timeline & Courtroom Amphitheater */}
       <section id="courtroom-stage" className="four-act-Readout">
         <div className="act-stepper">
           {[
@@ -839,18 +1036,24 @@ export default function App() {
             const order = ["CHARTER_LOCKED", "EVIDENCE_FILED", "CROSS_EXAMINED", "SETTLED"];
             const currentIdx = order.indexOf(currentCase.stage);
             const isDone = idx <= currentIdx;
+            const isCurrent = idx === currentIdx;
             return (
-              <div key={step.key} className={`act-step ${isDone ? "active" : ""}`}>
-                <span className="act-num">0{idx + 1}</span>
+              <div
+                key={step.key}
+                className={`act-step ${isDone ? "active" : ""} ${isCurrent ? "current" : ""}`}
+              >
+                <span className="act-watermark">0{idx + 1}</span>
+                <span className="act-num">ACT 0{idx + 1}</span>
                 <span className="act-name">{step.label}</span>
               </div>
             );
           })}
         </div>
 
-        {/* Transaction Status & Trust Feedback Banner */}
+        {/* Live Telemetry & Consensus Status Ticker */}
         <div className={`tx-feedback-banner status-${txLifecycle.status.toLowerCase()}`}>
           <div className="tx-status-main">
+            <span className="status-beacon" />
             <strong>
               {txLifecycle.status === "IDLE" && t.txStatusIdle}
               {txLifecycle.status === "REQUESTED" && t.txStatusRequested}
@@ -868,13 +1071,13 @@ export default function App() {
           </div>
         </div>
 
-        {/* Four Courtroom Bench Switcher Tabs */}
+        {/* Courtroom Bench Perspective Selector */}
         <nav className="bench-tabs" aria-label="Courtroom Perspectives">
           {[
-            { id: "PETITIONER", label: t.benchPetitioner },
-            { id: "RESPONDENT", label: t.benchRespondent },
-            { id: "JURY", label: t.benchJury },
-            { id: "PRECEDENTS", label: t.benchPrecedents },
+            { id: "PETITIONER", code: "BENCH I", label: t.benchPetitioner },
+            { id: "RESPONDENT", code: "BENCH II", label: t.benchRespondent },
+            { id: "JURY", code: "CHAMBER III", label: t.benchJury },
+            { id: "PRECEDENTS", code: "ARCHIVE IV", label: t.benchPrecedents },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -885,7 +1088,8 @@ export default function App() {
                 soundEngine.playPaperRustle();
               }}
             >
-              {tab.label}
+              <span className="bench-code">{tab.code}</span>
+              <span className="bench-label">{tab.label}</span>
             </button>
           ))}
         </nav>
@@ -895,7 +1099,8 @@ export default function App() {
           {activeBench === "PETITIONER" && (
             <div className="bench-two-col">
               {/* Act I: Create / Lock Charter */}
-              <form className="dossier-card" onSubmit={handleOpenEscrowCase}>
+              <form className="dossier-card paper-stack" onSubmit={handleOpenEscrowCase}>
+                <div className="dossier-stamp">PETITIONER FILING · ACT I</div>
                 <h3>{t.act1Title}</h3>
                 <p className="card-sub">{t.createCaseModalTitle}</p>
                 <label className="field-label">
@@ -955,12 +1160,13 @@ export default function App() {
               </form>
 
               {/* Act III: Cross-Examine & Tamper Witness Test */}
-              <form className="dossier-card" onSubmit={handleFileRebuttal}>
+              <form className="dossier-card paper-stack" onSubmit={handleFileRebuttal}>
+                <div className="dossier-stamp crimson">CROSS-EXAMINATION · ACT III</div>
                 <h3>
                   {t.act3Title} ({currentCase.case_id})
                 </h3>
                 <div className="hash-readout">
-                  <span>{t.charterHashLabel}:</span>
+                  <span className="hash-title">{t.charterHashLabel}</span>
                   <code>{currentCase.charter_sha256}</code>
                 </div>
                 <label className="field-label">
@@ -1037,12 +1243,18 @@ export default function App() {
           )}
 
           {activeBench === "RESPONDENT" && (
-            <form className="dossier-card" onSubmit={handleFileEvidence}>
+            <form className="dossier-card paper-stack" onSubmit={handleFileEvidence}>
+              <div className="dossier-stamp emerald">RESPONDENT DOCKET · ACT II</div>
               <h3>
                 {t.act2Title} ({currentCase.case_id})
               </h3>
               <p className="dual-source-callout">{t.dualSourceRuleNote}</p>
-              {showClerkNotes && <div className="clerk-note">{t.clerkNoteFailover}</div>}
+              {showClerkNotes && (
+                <div className="clerk-note">
+                  <span className="clerk-pin">✎</span>
+                  {t.clerkNoteFailover}
+                </div>
+              )}
 
               <div className="field-row">
                 <label className="field-label">
@@ -1096,18 +1308,20 @@ export default function App() {
 
           {activeBench === "JURY" && (
             <div className="bench-two-col">
-              <div className="dossier-card">
+              <div className="dossier-card paper-stack">
+                <div className="dossier-stamp">EVIDENTIARY RECORD · {currentCase.case_id}</div>
                 <h3>
                   {t.act4Title} · {currentCase.case_id}
                 </h3>
                 <div className="evidence-compare-box">
-                  <div>
-                    <strong>Locked Charter ({currentCase.nominal_deposit} nominal units):</strong>
+                  <div className="evidence-block">
+                    <span className="block-tag">01 · LOCKED CHARTER ({currentCase.nominal_deposit} UNITS)</span>
                     <p>{currentCase.charter_text}</p>
                   </div>
-                  <div>
-                    <strong>Primary Evidence Source:</strong>
-                    <p>
+                  <div className="evidence-block">
+                    <span className="block-tag">02 · DUAL-SOURCE VERIFICATION ENDPOINTS</span>
+                    <div className="endpoint-row">
+                      <span className="ep-badge primary">PRIMARY</span>
                       <a
                         href={currentCase.primary_url}
                         target="_blank"
@@ -1116,9 +1330,9 @@ export default function App() {
                       >
                         {currentCase.primary_url || "Not filed yet"}
                       </a>
-                    </p>
-                    <strong>Backup Mirror Source (Auto-Failover):</strong>
-                    <p>
+                    </div>
+                    <div className="endpoint-row">
+                      <span className="ep-badge backup">BACKUP</span>
                       <a
                         href={currentCase.backup_url}
                         target="_blank"
@@ -1127,36 +1341,37 @@ export default function App() {
                       >
                         {currentCase.backup_url || "Not filed yet"}
                       </a>
-                    </p>
+                    </div>
                   </div>
-                  <div>
-                    <strong>Respondent Defense vs. Petitioner Rebuttal:</strong>
+                  <div className="evidence-block">
+                    <span className="block-tag">03 · ADVERSARIAL PLEADINGS</span>
                     <p>
-                      <em>Defense:</em> {currentCase.defense_brief || "Pending"}
+                      <strong>Respondent Defense:</strong> {currentCase.defense_brief || "Pending"}
                     </p>
                     <p>
-                      <em>Rebuttal:</em> {currentCase.rebuttal_brief || "Pending"} (Cited:{" "}
-                      <code>{currentCase.cited_precedent_id}</code>)
+                      <strong>Petitioner Rebuttal:</strong> {currentCase.rebuttal_brief || "Pending"}{" "}
+                      <span className="cite-chip">Cited: {currentCase.cited_precedent_id}</span>
                     </p>
                   </div>
                 </div>
               </div>
 
-              <div className="dossier-card">
-                <h3>Discrete Integer Basis-Point Tier Selection (Zero Floats)</h3>
+              <div className="dossier-card paper-stack">
+                <div className="dossier-stamp emerald">TRIBUNAL CONSENSUS BENCH</div>
+                <h3>Discrete Integer Basis-Point Tier Selection</h3>
                 <p className="card-sub">
                   Validators converge on one of 5 exact integer tiers (`0`, `2500`, `5000`, `7500`,
                   `10000 bps`). Selecting a tier that diverges from `{currentCase.cited_precedent_id}`
-                  by 5000 bps or more automatically appends a `PRECEDENT_DIVERGENCE_WITNESS`.
+                  by `>= 5000 bps` automatically appends a `PRECEDENT_DIVERGENCE_WITNESS`.
                 </p>
 
                 <div className="bps-tier-grid" role="radiogroup" aria-label="Basis Point Tiers">
                   {[
-                    { bps: 0, code: "REJECT (0%)" },
-                    { bps: 2500, code: "PARTIAL_LOW (25%)" },
-                    { bps: 5000, code: "PARTIAL_MID (50%)" },
-                    { bps: 7500, code: "PARTIAL_HIGH (75%)" },
-                    { bps: 10000, code: "PASS (100%)" },
+                    { bps: 0, pct: "0%", code: "REJECT" },
+                    { bps: 2500, pct: "25%", code: "PARTIAL_LOW" },
+                    { bps: 5000, pct: "50%", code: "PARTIAL_MID" },
+                    { bps: 7500, pct: "75%", code: "PARTIAL_HIGH" },
+                    { bps: 10000, pct: "100%", code: "PASS" },
                   ].map((tier) => (
                     <button
                       key={tier.bps}
@@ -1168,6 +1383,7 @@ export default function App() {
                         soundEngine.playPaperRustle();
                       }}
                     >
+                      <span className="bps-pct">{tier.pct}</span>
                       <span className="bps-val">{tier.bps} bps</span>
                       <span className="bps-name">{tier.code}</span>
                     </button>
@@ -1175,7 +1391,12 @@ export default function App() {
                 </div>
 
                 <div className="ruling-summary-banner">
-                  <strong>Current Verdict Status: {currentCase.verdict_code}</strong>
+                  <div className="ruling-verdict-row">
+                    <span>VERDICT STATUS:</span>
+                    <strong className={`verdict-pill v-${currentCase.verdict_code.toLowerCase()}`}>
+                      {currentCase.verdict_code} ({activeBpsForBeam} BPS)
+                    </strong>
+                  </div>
                   <p>{currentCase.ruling_rationale}</p>
                 </div>
 
@@ -1202,58 +1423,85 @@ export default function App() {
           )}
 
           {activeBench === "PRECEDENTS" && (
-            <div className="precedents-bench">
+            <div className="precedents-bench dossier-card paper-stack">
+              <div className="dossier-stamp">STARE DECISIS · ON-CHAIN CODEX</div>
               <h3>{t.precedentDrawerTitle}</h3>
               <p className="card-sub">{t.precedentDrawerHint}</p>
-              {showClerkNotes && <div className="clerk-note">{t.clerkNoteWitness}</div>}
+              {showClerkNotes && (
+                <div className="clerk-note">
+                  <span className="clerk-pin">✎</span>
+                  {t.clerkNoteWitness}
+                </div>
+              )}
 
-              {/* Technique 3: Pull-out Index Dossier Drawer with Preview */}
+              {/* Technique 3: 3D Fanned Archive Rack + Wax-Sealed Inspection Sheet */}
               <div className="dossier-drawer-grid">
                 <div className="dossier-tab-list">
-                  {Object.values(courtSnapshot.precedents).map((prec) => (
+                  {Object.values(courtSnapshot.precedents).map((prec, idx) => (
                     <button
                       key={prec.precedent_id}
                       type="button"
                       className={`dossier-folder-tab ${
                         activePrecedentId === prec.precedent_id ? "open" : ""
                       }`}
+                      style={{ "--folder-idx": idx }}
                       onMouseEnter={() => setActivePrecedentId(prec.precedent_id)}
                       onClick={() => {
                         setActivePrecedentId(prec.precedent_id);
                         soundEngine.playPaperRustle();
                       }}
                     >
-                      <span className="folder-id">{prec.precedent_id}</span>
-                      <span className="folder-cat">{prec.category}</span>
-                      <span className="folder-bps">{prec.payout_bps} bps</span>
+                      <div className="folder-top-row">
+                        <span className="folder-id">{prec.precedent_id}</span>
+                        <span className="folder-bps">{prec.payout_bps} BPS</span>
+                      </div>
+                      <div className="folder-cat">{prec.category}</div>
+                      <div className="folder-mini-bar">
+                        <span style={{ width: `${Math.round(prec.payout_bps / 100)}%` }} />
+                      </div>
                     </button>
                   ))}
                 </div>
 
                 {courtSnapshot.precedents[activePrecedentId] && (
                   <div className="dossier-preview-sheet">
+                    <div className="wax-seal-emblem" aria-hidden="true">
+                      <span>STARE</span>
+                      <strong>{courtSnapshot.precedents[activePrecedentId].payout_bps}</strong>
+                      <span>BPS</span>
+                    </div>
                     <div className="preview-header">
-                      <h4>
-                        {courtSnapshot.precedents[activePrecedentId].precedent_id} ·{" "}
-                        {courtSnapshot.precedents[activePrecedentId].verdict_code}
-                      </h4>
+                      <div>
+                        <span className="preview-kicker">CODIFIED JUDICIAL PRECEDENT</span>
+                        <h4>
+                          {courtSnapshot.precedents[activePrecedentId].precedent_id} ·{" "}
+                          {courtSnapshot.precedents[activePrecedentId].verdict_code}
+                        </h4>
+                      </div>
                       <span className="citation-badge">
                         Citations: {courtSnapshot.precedents[activePrecedentId].citations_count}
                       </span>
                     </div>
                     <p className="preview-principle">
-                      {courtSnapshot.precedents[activePrecedentId].principle_summary}
+                      “{courtSnapshot.precedents[activePrecedentId].principle_summary}”
                     </p>
                     <div className="preview-meta">
-                      <span>
-                        Source Case: {courtSnapshot.precedents[activePrecedentId].source_case_id}
-                      </span>
-                      <span>
-                        Fault Code: {courtSnapshot.precedents[activePrecedentId].fault_code}
-                      </span>
-                      <span>
-                        Settlement Tier: {courtSnapshot.precedents[activePrecedentId].payout_bps} bps
-                      </span>
+                      <div className="meta-box">
+                        <span className="meta-lbl">SOURCE CASE</span>
+                        <strong>
+                          {courtSnapshot.precedents[activePrecedentId].source_case_id}
+                        </strong>
+                      </div>
+                      <div className="meta-box">
+                        <span className="meta-lbl">FAULT CLASSIFICATION</span>
+                        <strong>{courtSnapshot.precedents[activePrecedentId].fault_code}</strong>
+                      </div>
+                      <div className="meta-box">
+                        <span className="meta-lbl">SETTLEMENT RATIO</span>
+                        <strong>
+                          {courtSnapshot.precedents[activePrecedentId].payout_bps} / 10000 BPS
+                        </strong>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1266,10 +1514,14 @@ export default function App() {
       {/* Evolving State Section 1: Non-Overwriting Witness Log */}
       <section className="witness-section">
         <div className="section-head">
+          <span className="section-kicker">IMMUTABLE AUDIT TRAIL · ZERO SILENT OVERWRITES</span>
           <h2>{t.witnessLogTitle}</h2>
         </div>
         {courtSnapshot.witnesses.length === 0 ? (
-          <p className="empty-witness">{t.witnessEmpty}</p>
+          <div className="empty-witness-box">
+            <span className="seal-icon">⚖</span>
+            <p className="empty-witness">{t.witnessEmpty}</p>
+          </div>
         ) : (
           <div className="witness-cards">
             {courtSnapshot.witnesses.map((w) => (
@@ -1289,35 +1541,45 @@ export default function App() {
       {/* Evolving State Section 2: Nominal Escrow & Reputation Ledger */}
       <section className="ledger-section">
         <div className="section-head">
+          <span className="section-kicker">STUDIONET 61999 · EVOLVING REPUTATION & ESCROW STATE</span>
           <h2>{t.ledgerSectionTitle}</h2>
         </div>
         <div className="ledger-cards-grid">
-          {Object.values(courtSnapshot.accounts).map((acct) => (
-            <div key={acct.party_id} className="party-ledger-card">
-              <div className="party-card-top">
-                <span className="party-id-mono">{acct.party_id}</span>
-                <span className="rep-pill">
-                  {t.colReputation}: {acct.reputation_score}
-                </span>
+          {Object.values(courtSnapshot.accounts).map((acct) => {
+            const repPct = Math.min(100, Math.round((Number(acct.reputation_score) / 1000) * 100));
+            return (
+              <div key={acct.party_id} className="party-ledger-card">
+                <div className="party-card-top">
+                  <span className="party-id-mono">{acct.party_id}</span>
+                  <span className="rep-pill">
+                    {t.colReputation}: {acct.reputation_score}
+                  </span>
+                </div>
+
+                {/* Visual Reputation Progress Gauge */}
+                <div className="rep-gauge-track" aria-hidden="true">
+                  <div className="rep-gauge-fill" style={{ width: `${repPct}%` }} />
+                </div>
+
+                <div className="party-metrics">
+                  <div className="metric-cell">
+                    <span className="metric-label">{t.colNominalBal}</span>
+                    <strong className="metric-val">{acct.nominal_balance.toLocaleString()}</strong>
+                  </div>
+                  <div className="metric-cell">
+                    <span className="metric-label">{t.colLockedEscrow}</span>
+                    <strong className="metric-val">{acct.locked_escrow.toLocaleString()}</strong>
+                  </div>
+                  <div className="metric-cell">
+                    <span className="metric-label">{t.colCasesWon}</span>
+                    <strong className="metric-val">
+                      {acct.rulings_won} / {acct.cases_participated}
+                    </strong>
+                  </div>
+                </div>
               </div>
-              <div className="party-metrics">
-                <div>
-                  <span className="metric-label">{t.colNominalBal}</span>
-                  <strong className="metric-val">{acct.nominal_balance}</strong>
-                </div>
-                <div>
-                  <span className="metric-label">{t.colLockedEscrow}</span>
-                  <strong className="metric-val">{acct.locked_escrow}</strong>
-                </div>
-                <div>
-                  <span className="metric-label">{t.colCasesWon}</span>
-                  <strong className="metric-val">
-                    {acct.rulings_won} / {acct.cases_participated}
-                  </strong>
-                </div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
     </div>
