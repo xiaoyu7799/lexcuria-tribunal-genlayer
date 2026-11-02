@@ -61,10 +61,10 @@ export const INITIAL_COURT_SNAPSHOT = {
   accounts: {
     petitioner_atlas_dao: {
       party_id: "petitioner_atlas_dao",
-      nominal_balance: 42000,
-      locked_escrow: 18000,
+      nominal_balance: 50000,
+      locked_escrow: 10000,
       reputation_score: 820,
-      cases_participated: 2,
+      cases_participated: 1,
       rulings_won: 0,
     },
     respondent_atelier_nova: {
@@ -72,7 +72,7 @@ export const INITIAL_COURT_SNAPSHOT = {
       nominal_balance: 20000,
       locked_escrow: 0,
       reputation_score: 840,
-      cases_participated: 2,
+      cases_participated: 1,
       rulings_won: 1,
     },
     juror_pool_studionet: {
