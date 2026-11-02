@@ -58,6 +58,12 @@ MOCK_LLM_RESPONSE = json.dumps(
 )
 
 
+class _MockWebResponse:
+    def __init__(self, body):
+        self.status = 200
+        self.body = body
+
+
 def _mock_get_webpage(url: str, mode: str = "text") -> str:
     if url in MOCK_WEB_RESPONSES:
         val = MOCK_WEB_RESPONSES[url]
@@ -67,12 +73,30 @@ def _mock_get_webpage(url: str, mode: str = "text") -> str:
     raise RuntimeError(f"Simulated network failure for {url}")
 
 
-def _mock_exec_prompt(prompt: str) -> str:
-    return MOCK_LLM_RESPONSE
+def _mock_exec_prompt(prompt: str, response_format: str = "json"):
+    # gl.nondet.exec_prompt with response_format="json" returns a parsed dict
+    # in the proven contracts; the mock returns the parsed JSON dict.
+    return json.loads(MOCK_LLM_RESPONSE)
+
+
+class _MockWeb:
+    def get(self, url: str):
+        if url in MOCK_WEB_RESPONSES:
+            val = MOCK_WEB_RESPONSES[url]
+            if isinstance(val, Exception):
+                raise val
+            return _MockWebResponse(val)
+        raise RuntimeError(f"Simulated network failure for {url}")
+
+
+class _MockNondet:
+    web = _MockWeb()
+    exec_prompt = staticmethod(_mock_exec_prompt)
 
 
 mock_gl.get_webpage = _mock_get_webpage
 mock_gl.exec_prompt = _mock_exec_prompt
+mock_gl.nondet = _MockNondet()
 sys.modules["genlayer"] = mock_gl
 
 # Import contract under test

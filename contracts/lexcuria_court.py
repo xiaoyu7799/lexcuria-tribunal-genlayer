@@ -414,24 +414,30 @@ class LexCuriaCourt(gl.Contract):
         cited_prec_bps = int(cited_prec.get("payout_bps", 7500))
 
         def validator_deliberate() -> str:
-            # 1. Try Primary Source first, fallback to Backup Source if Primary fails
-            evidence_body = ""
-            source_used = "PRIMARY"
-            try:
-                raw_primary = gl.get_webpage(primary_url, mode="text")
-                if raw_primary and len(raw_primary.strip()) >= 16:
-                    evidence_body = raw_primary.strip()
-            except Exception:
-                evidence_body = ""
+            # 1. Try Primary Source first, fallback to Backup Source if Primary fails.
+            # Proven GenVM API (used by WeatherProof / DuelForge / Counterpoint /
+            # Veridict on Studionet): gl.nondet.web.get(url) with .status / .body.
+            # The draft's gl.get_webpage() does not exist in this GenVM, so it
+            # always raised and every settle aborted with EXTERNAL_EVIDENCE_UNAVAILABLE.
+            def _fetch(url: str) -> str:
+                try:
+                    resp = gl.nondet.web.get(url)
+                    if getattr(resp, "status", 200) != 200:
+                        return ""
+                    body = resp.body
+                    if isinstance(body, bytes):
+                        text = body.decode("utf-8")
+                    else:
+                        text = str(body)
+                    return text.strip() if len(text.strip()) >= 16 else ""
+                except Exception:
+                    return ""
 
+            evidence_body = _fetch(primary_url)
+            source_used = "PRIMARY"
             if not evidence_body:
                 source_used = "BACKUP"
-                try:
-                    raw_backup = gl.get_webpage(backup_url, mode="text")
-                    if raw_backup and len(raw_backup.strip()) >= 16:
-                        evidence_body = raw_backup.strip()
-                except Exception:
-                    evidence_body = ""
+                evidence_body = _fetch(backup_url)
 
             if not evidence_body:
                 return json.dumps({"status": "FETCH_FAILED"})
@@ -486,19 +492,23 @@ Return ONLY valid JSON matching this exact schema (no floats allowed):
   "fault_code": "MINOR_DOC_OMISSION",
   "evidence_tier": "VERIFIED_PUBLIC_REPO"
 }}"""
-            llm_raw = gl.exec_prompt(prompt)
-            cleaned = llm_raw.strip()
-            if "```" in cleaned:
-                parts = cleaned.split("```")
-                for part in parts:
-                    candidate = part.strip()
-                    if candidate.startswith("json"):
-                        candidate = candidate[4:].strip()
-                    if candidate.startswith("{") and candidate.endswith("}"):
-                        cleaned = candidate
-                        break
-
-            parsed = json.loads(cleaned)
+            # Proven GenVM API: gl.nondet.exec_prompt(prompt, response_format="json").
+            # The draft's gl.exec_prompt() does not exist in this GenVM.
+            llm_result = gl.nondet.exec_prompt(prompt, response_format="json")
+            if isinstance(llm_result, dict):
+                parsed = llm_result
+            else:
+                cleaned = str(llm_result).strip()
+                if "```" in cleaned:
+                    parts = cleaned.split("```")
+                    for part in parts:
+                        candidate = part.strip()
+                        if candidate.startswith("json"):
+                            candidate = candidate[4:].strip()
+                        if candidate.startswith("{") and candidate.endswith("}"):
+                            cleaned = candidate
+                            break
+                parsed = json.loads(cleaned)
             raw_bps = int(parsed.get("payout_bps", 7500))
             # Snap to nearest allowed discrete integer tier to guarantee zero float & consensus convergence
             snapped_bps = min(ALLOWED_BPS_TIERS, key=lambda tier: abs(tier - raw_bps))
