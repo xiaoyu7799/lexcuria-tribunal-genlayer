@@ -5,11 +5,11 @@
 - **Contract (GenLayer Stable Studionet, 61999)**: 0x3b82A35c7D6701eefB6F500d8b84b37C1720e1aa — https://explorer-studio.genlayer.com/address/0x3b82A35c7D6701eefB6F500d8b84b37C1720e1aa
 - **Target Network**: GenLayer Stable Studionet (`Chain ID: 61999`, RPC: `https://studio.genlayer.com/api`, `gas: 0`)
 
-> **Important Status Notice**: This repository contains the complete initial code package (Intelligent Contract, local mock test suite, resumable Studionet deployment script, and bilingual Editorial Legal Gazette frontend). Actual Studionet contract deployment, live transaction finalization, and GitHub Pages publishing are executed and verified by Muse / the repository owner.
+> The repository includes the Intelligent Contract, local mock tests, a resumable Studionet deployment script and a bilingual frontend. Local simulations and finalized Studionet results are separate evidence categories; deployment and transaction limitations are documented in `KNOWN_LIMITATIONS.md`.
 
 ---
 
-## 1. Pre-Work Four Lines (Mechanism & Diversity Declaration)
+## 1. Tribunal mechanism
 
 - **(a) Category**: **Subjective Adjudication** — Multi-party unstructured evidence arbitration, nominal escrow settlement, and judicial precedent evolution.
 - **(b) Mechanism (What Consensus Decides + Consequences)**: Validators independently fetch external unstructured evidence (`primary_url` with automatic failover to `backup_url`; if both fail, the contract aborts before state mutation so the case remains in `CROSS_EXAMINED` and retryable), evaluate it against the locked acceptance charter, Respondent's defense brief, Petitioner's cross-examination rebuttal, and cited historical precedents, and reach consensus on a discrete integer basis-point tier (`0`, `2500`, `5000`, `7500`, or `10000 bps` — zero floats). **Consequences**: (1) splits locked nominal Studionet escrow balance between Respondent and Petitioner using integer arithmetic; (2) updates party reputation scores and juror consensus counts; (3) mints a new numbered `PrecedentRecord` and, if the ruling diverges from a cited same-category precedent by `>= 5000 bps`, preserves the historical precedent intact and appends a `PrecedentDivergenceWitness`.

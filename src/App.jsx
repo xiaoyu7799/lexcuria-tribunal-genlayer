@@ -470,7 +470,7 @@ export default function App() {
   };
 
   // Act IV: Deliberate & Settle Escrow in integer basis points
-  // Fixes Muse's note: immediately re-reads live Studionet snapshot upon FINALIZED
+  // Refresh the live Studionet snapshot after transaction finality.
   const handleDeliberateAndSettle = async () => {
     if (currentCase.stage === "SETTLED") return;
     try {
